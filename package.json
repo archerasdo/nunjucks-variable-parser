@@ -9,6 +9,10 @@
     "precommit": "tnpm run build && lint-staged",
     "test": "jest --coverage"
   },
+  "files": [
+    "lib",
+    "index.js"
+  ],
   "lint-staged": {
     "**/*.js": [
       "npm run lint",
