@@ -1,14 +1,44 @@
 import nunjucks from "nunjucks";
 
+const VARIBALE_PARENT_SYMBOL = Symbol("#Variable_parent");
+const VARIBALE_TYPE_SYMBOL = Symbol("#Variable_type");
+
 const { parser, nodes } = nunjucks;
 
 const {
-  LookupVal, Symbol, Pair, Compare, Filter, FunCall, For, If,
+  LookupVal, Symbol: NodeSymbol, Pair, Compare, Filter, FunCall, For, If, Literal,
 } = nodes;
 
+
+class Variable {
+  constructor(value, options = {}) {
+    const { type = "string", parent = undefined } = options;
+
+    this[VARIBALE_PARENT_SYMBOL] = parent;
+    this[VARIBALE_TYPE_SYMBOL] = type;
+    this.value = value;
+  }
+
+  set parent(parent) {
+    this[VARIBALE_PARENT_SYMBOL] = parent;
+  }
+
+  get parent() {
+    return this[VARIBALE_PARENT_SYMBOL];
+  }
+
+  set type(type) {
+    this[VARIBALE_TYPE_SYMBOL] = type;
+  }
+
+  get type() {
+    return this[VARIBALE_TYPE_SYMBOL];
+  }
+}
+
 function traverseNode(node, inLoop = false) {
-  if (node instanceof Symbol) {
-    return [node.value];
+  if (node instanceof NodeSymbol) {
+    return [new Variable(node.value)];
   } if (node instanceof Pair) {
     return parsePair(node, inLoop);
   } if (node instanceof LookupVal) {
@@ -86,14 +116,20 @@ function parseLookUp(node, inLoop = false) {
     throw new Error(`current node type is not LookupVal, it is ${node.typename}`);
   }
   const { target, val } = node;
-  if (!(target instanceof Symbol)) {
+  if (!(target instanceof NodeSymbol)) {
     throw new Error("表达式有误，LookupVal target 必须为变量!");
   }
 
   if (target.value === "loop") {
     return [];
   }
-  return [...traverse(target, inLoop), ...traverse(val, inLoop)];
+
+  const targetVar = new Variable(target.value, { type: "object" });
+  if (val instanceof Literal) {
+    return [targetVar, new Variable(val.value, { parent: targetVar })];
+  }
+
+  return [targetVar, ...traverse(val, inLoop)];
 }
 
 function parsePair(node, inLoop = false) {
@@ -112,26 +148,47 @@ function parseFor(node) {
   const { arr, name, body } = node;
 
 
-  if (arr instanceof Symbol && name instanceof Symbol) {
-    ret.push(arr.value);
-    ret.push(`${arr.value}.${name.value}`);
+  if (arr instanceof NodeSymbol && name instanceof NodeSymbol) {
+    const listVar = new Variable(arr.value, { type: "list" });
+    const itemVar = new Variable(name.value, { parent: listVar });
+    ret.push(itemVar);
+    ret.push(listVar);
   } else {
     ret = [...ret, ...traverse(arr, true), ...traverse(name, true)];
   }
 
   let bodyVariable = traverse(body, true);
-  if (ret.find(el => el.includes("."))) {
-    const childrenVariable = ret.filter(el => el.includes("."))
-      .map(el => el.split(".")[1]);
-    bodyVariable = bodyVariable.filter(el => !childrenVariable.includes(el));
+  const childrenVariable = ret.filter(el => el.parent && el.parent.type === "list");
+  if (childrenVariable.length > 0) {
+    const finalBodyVar = [];
+    for (const bVar of bodyVariable) {
+      const { value, parent, type } = bVar;
+      const hasItemVar = childrenVariable.find(el => value === el.value);
+      if (hasItemVar) {
+        const itemVar = ret.find(el => el.value === value);
+        itemVar.type = type;
+        continue;
+      }
+      const hasParentItemVar = childrenVariable.find(el => parent.value === el.value);
+
+      if (hasParentItemVar) {
+        bVar.parent = hasParentItemVar;
+        finalBodyVar.push(bVar);
+        continue;
+      }
+
+      finalBodyVar.push(bVar);
+    }
+
+    bodyVariable = finalBodyVar;
   }
   ret = ret.concat(bodyVariable);
   return ret;
 }
 
 
-export default function (tpl) {
+export default function (tpl, transformer = e => e) {
   const ast = parser.parse(tpl, true);
 
-  return traverse(ast);
+  return traverse(ast).map(el => transformer(el));
 }

@@ -14,6 +14,8 @@ module.exports = {
       "no-console": "error",
       "arrow-parens": 0,
       "no-use-before-define": ["error", {"functions": false }],
-      "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
+      "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+      "no-continue": 0,
+      "no-restricted-syntax": 0
   }
 }
